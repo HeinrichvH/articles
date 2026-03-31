@@ -1,0 +1,298 @@
+#set document(
+  title: "Refactoring Is Not Heroism — An Information-Theoretic Proof",
+  author: ("Heinrich von Helmolt", "Claude"),
+)
+
+#set page(
+  paper: "a4",
+  margin: (x: 2.5cm, y: 2.5cm),
+  numbering: "1",
+  header: context {
+    if counter(page).get().first() > 1 [
+      #set text(size: 8pt, fill: luma(120))
+      _Refactoring Is Not Heroism_ #h(1fr) Building with AI
+    ]
+  },
+)
+
+#set text(
+  font: "New Computer Modern",
+  size: 11pt,
+  lang: "en",
+)
+
+#set par(
+  justify: true,
+  leading: 0.65em,
+)
+
+#set heading(numbering: none)
+
+#show heading.where(level: 1): it => {
+  set text(size: 20pt, weight: "bold")
+  v(1cm)
+  it
+  v(0.3cm)
+}
+
+#show heading.where(level: 2): it => {
+  set text(size: 13pt, weight: "bold")
+  v(0.6cm)
+  it
+  v(0.2cm)
+}
+
+#show raw.where(block: true): it => {
+  set text(size: 9.5pt)
+  block(
+    fill: luma(245),
+    inset: 12pt,
+    radius: 3pt,
+    width: 100%,
+    it,
+  )
+}
+
+// --- Title Page ---
+
+#v(3cm)
+
+#align(center)[
+  #text(size: 24pt, weight: "bold")[
+    Refactoring Is Not Heroism
+  ]
+
+  #v(0.3cm)
+
+  #text(size: 16pt, fill: luma(80))[
+    An Information-Theoretic Proof
+  ]
+
+  #v(1.5cm)
+
+  #text(size: 12pt)[
+    Heinrich von Helmolt & Claude
+  ]
+
+  #v(0.5cm)
+
+  #text(size: 10pt, fill: luma(100))[
+    From the series _Building with AI_ \
+    March 2026
+  ]
+
+  #v(0.3cm)
+]
+
+// --- Article Body ---
+
+= Refactoring Is Not Heroism
+
+Every codebase that grows will get messy. This is not a failure of discipline. It is
+a mathematical certainty.
+
+Most teams treat this mess as a moral failing. They create "tech debt" tickets that
+rot in the backlog. They plan "refactoring sprints" as if cleaning were a special event
+that requires permission. They celebrate the developer who finally tackles the mess as
+a hero.
+
+This framing is wrong. And information theory has proven why since 1948.
+
+== The Proof Already Exists
+
+A codebase is a compression scheme. The folder structure, the class boundaries, the
+module interfaces --- these are an encoding that minimizes the description length of
+your system. When the encoding fits the content, you can locate any concept with
+minimal navigation. Cognitive cost is low.
+
+Shannon proved that a compression scheme is optimized for the data it was built from.
+It cannot anticipate data it has never seen. If you could perfectly predict future
+features, those features would carry zero information --- they wouldn't be new.
+
+Therefore: *every new feature that carries real information will, to some degree,
+violate the existing encoding.* The structure was designed for what came before.
+The new thing does not fit perfectly. Description length grows.
+
+This is not a failure of your architecture. It is a theorem.
+
+== The Tipping Point Is Calculatable
+
+The Minimum Description Length principle (Rissanen, 1978) gives us the tipping point:
+
+```
+Refactor when:  L(code | current_structure) > L(code | new_structure) + C(refactor)
+```
+
+Where $L$ is description length --- the cognitive cost of understanding the code under
+a given organizational scheme --- and $C$ is the cost of restructuring.
+
+#figure(
+  image("figures/article-mdl-tipping-point.png", width: 95%),
+  caption: [The MDL tipping point: when restructuring becomes cheaper than continuing.],
+)
+
+Software engineering has been measuring proxies for $L$ for decades: cyclomatic
+complexity (McCabe, 1976), Halstead volume, coupling metrics (Yourdon & Constantine,
+1979). And neuroscience confirmed the biological constraint: fMRI studies show that
+*textual size (LOC, token count) is the strongest predictor of brain activation in
+working memory regions* --- stronger than cyclomatic complexity (Peitek et al., ICSE
+2021, Distinguished Paper Award). Human working memory holds approximately 4
+independent chunks (Cowan, 2001).
+
+We built a composite formula that combines these signals:
+
+```
+S(file) = 0.40 * (LOC / 400)
+        + 0.25 * (1 - cohesion)
+        + 0.20 * (concerns / 4)
+        + 0.15 * (imports / median)
+```
+
+Where:
+- *400* is the empirical code review effectiveness window (LOC)
+- *cohesion* is semantic similarity between code sections (0--1, measured via embeddings)
+- *4* is the working memory chunk limit (Cowan, 2001)
+- *imports/median* normalizes dependency fan-out against the codebase
+
+#figure(
+  image("figures/article-formula-breakdown.png", width: 95%),
+  caption: [Score breakdown for a 600 LOC file with 5 concerns and low cohesion.],
+)
+
+Each weight reflects the research: fMRI data shows file size dominates cognitive load
+(0.40), followed by how many unrelated things a file does (cohesion: 0.25, concerns:
+0.20), and finally coupling to external modules (0.15).
+
+Cohesion is the load-bearing term. Without it, the formula degrades to a size+import
+counter that cannot distinguish a 400-line file of identical boilerplate from a
+400-line file with 15 unrelated concerns. Cohesion is what makes the formula work.
+
+== Testing It Against Reality
+
+We ran this formula against a production codebase: 947 source files across six
+microservices.
+
+In a recent cleanup cycle, we split eight service files that had grown too large ---
+each between 800 and 1,400 lines. No planning, no "refactoring sprint." We felt the
+friction and cleaned up. Pure structural refactors: no logic changes, just splitting
+along seams that were already visible in the code.
+
+When we scored those eight files retroactively using the formula, they all fell above
+the tipping point. The formula predicted exactly the splits we had already made by
+intuition.
+
+When we scanned the full codebase, 17 files scored above threshold. Eight were the
+ones we had just split. Nine were new candidates we hadn't noticed yet --- files where
+the cost was accumulating but hadn't hurt enough to trigger action.
+
+We then used the formula prospectively: the next scan flagged 10 files above threshold.
+We worked through all of them. Eight splits were genuinely valuable --- exposing
+duplicated logic, mixed read/write concerns, and interleaved domains. Two were false
+positives: boilerplate gRPC dispatchers where every method was an identical four-line
+delegation. The formula scored them high because of import count and concern count,
+but there was no actual complexity to reduce. *80% hit rate on a forward-looking scan,
+without the formula having been tuned for this round.*
+
+The false positives had a common cause: missing cohesion data. The embedding pipeline
+had silently truncated results, so those files scored with a default penalty instead
+of their actual (high) cohesion. Once we fixed the pipeline to return complete data,
+the formula would have correctly scored those dispatchers below threshold --- because
+cohesion is the term that distinguishes "large and messy" from "large but uniform."
+
+*A formula with incomplete inputs can give false confidence.* It still beats gut
+feeling (which missed nine candidates entirely), but metrics fail silently. You need
+to validate the pipeline, not just the math.
+
+The score distribution follows the pattern information theory predicts: a right-skewed
+curve with the bulk of files in a healthy range and a thin tail of files accumulating
+entropy.
+
+#figure(
+  image("figures/article-convergence.png", width: 95%),
+  caption: [Every split lands in the cognitive window (250--420 LOC).],
+)
+
+After splitting, file sizes converged to *250--420 lines* --- the range where a single
+file holds one concern and fits in working memory. This is not a style preference. It
+is the point where description length is minimized: small enough to comprehend, large
+enough to be self-contained.
+
+== AI Changes the Tempo, Not the Cycle
+
+There is a nuance specific to AI-assisted development that nobody is talking about.
+
+AI can generate code fast. A pair-programming session with an LLM produces more lines
+per hour than manual coding. Files grow faster. Features land faster. Entropy
+accumulates faster.
+
+But AI can also _read_ 800 lines without friction. It doesn't scroll. It doesn't lose
+context. So the pain signal --- the moment you feel that a file is too large --- arrives
+later than it should. The human is still the bottleneck for comprehension, but the AI
+masks the symptom by handling the navigation invisibly.
+
+This creates a gap: the theoretical tipping point (where restructuring is cheaper)
+might be at 500 lines, but you don't _feel_ it until 800 because your AI partner was
+carrying the cognitive load for you. By the time you notice, you've been paying extra
+cost for 300 lines.
+
+The entropy cycle doesn't change with AI. The physics is the same. But the tempo
+needs to increase --- you have to breathe faster because you're running faster. And
+you can't rely on your gut to tell you when, because AI dulls the signal. You need
+a formula.
+
+== The Threshold Is Not a Line Count
+
+This also reveals an important subtlety: *the threshold is not about file size.*
+A 600-line file with high cohesion --- all methods serving one concern, all logic
+flowing in one direction --- should not be split. You would only scatter context that
+belongs together, and now you're opening four files to understand one concept.
+
+A 300-line file with low cohesion --- three unrelated concerns sharing one file for
+historical reasons --- should be split immediately.
+
+This is why cohesion is in the formula, not just LOC. The tipping point is the balance
+between two costs:
+
+- *Splitting too late:* scrolling, mental overload, holding irrelevant context
+- *Splitting too early:* scattered context, jumping between files for one concept
+
+The formula measures both forces. The score rises when a file is large _and_
+incoherent. It stays low when a file is large but focused. Size is the strongest
+signal, but it is not the only one.
+
+== Why Premature Abstraction Fails (Same Framework)
+
+This framework also explains why over-engineering fails. Premature abstraction is
+an attempt to build an encoding scheme for information you do not yet have. By the
+MDL principle, an encoding optimized for hypothetical future data will be _worse_ for
+actual current data than a simple, direct encoding. You pay the complexity cost now
+and receive no compression benefit until the predicted data arrives --- if it ever does.
+
+== The Rhythm
+
+Growth creates mess. Cleaning resolves mess. These are not opposing forces. They are
+two halves of the same cycle. Like breathing.
+
+Resist the mess --- refuse to ship anything imperfect --- and you never grow. You spend
+your energy on abstraction layers that anticipate problems you don't have.
+
+Resist the cleaning --- treat refactoring as wasteful --- and the mess compounds. Every
+change requires understanding the entire system because nothing is contained anymore.
+
+The entropy cycle is not a philosophy. It is the information-theoretic consequence of
+building systems that do real work. Entropy is not your enemy. It is proof that your
+system is alive.
+
+The only question is whether you have a rhythm for managing it.
+
+#v(1cm)
+#line(length: 30%, stroke: 0.5pt + luma(180))
+#v(0.3cm)
+
+#set text(size: 9pt, fill: luma(100))
+
+_The formula described in this article is implemented as an open-source Python script
+(#link("https://github.com/HeinrichvH/articles/blob/main/building-with-ai/entropy.py")[entropy.py])
+that works on any codebase --- Python, JS/TS, Go, Rust, Java, C\#, and more.
+The academic references: Shannon (1948), Rissanen (1978), McCabe (1976),
+Halstead (1977), Cowan (2001), Peitek et al. (2021), Sturtevant (2013, MIT)._
