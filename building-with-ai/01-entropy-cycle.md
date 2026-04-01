@@ -155,6 +155,52 @@ file holds one concern and fits in working memory. This is not a style preferenc
 is the point where description length is minimized: small enough to comprehend, large
 enough to be self-contained.
 
+## Try It Yourself: FastAPI
+
+To show the formula works beyond our own codebase, we ran it against
+[FastAPI](https://github.com/tiangolo/fastapi) — a well-known, well-maintained Python
+framework. No tuning, no special configuration. Just:
+
+```
+python entropy.py fastapi/ --cohesion auto
+```
+
+The `--cohesion auto` flag computes semantic cohesion locally using
+[ollama](https://ollama.com) embeddings — no API keys, no cloud, just your machine.
+The script splits each file into logical sections, embeds them, and measures how
+similar the sections are to each other. High similarity means one concern. Low
+similarity means mixed concerns.
+
+Results: 24 files analyzed, 7 above the split threshold.
+
+| Score | File | LOC | CC | Cohesion |
+|------:|------|----:|---:|---------:|
+| 15.02 | applications.py | 4,036 | 11.9 | 0.63 |
+| 10.74 | routing.py | 4,374 | 7.6 | 0.59 |
+| 9.36 | param_functions.py | 2,323 | 13.3 | 0.71 |
+| 3.05 | dependencies/utils.py | 963 | 6.8 | 0.53 |
+| 2.70 | openapi/utils.py | 582 | 11.2 | 0.53 |
+
+The top three files are exactly the kind the formula is designed to catch: thousands
+of lines, high cyclomatic complexity, and moderate-to-low cohesion. `applications.py`
+alone is 4,036 lines with 41 distinct sections — it carries the entire application
+lifecycle, route registration, middleware stack, and OpenAPI generation in a single
+file. `routing.py` is even longer at 4,374 lines. These aren't bad code — FastAPI is
+a well-engineered project. But entropy accumulates in every codebase, and these files
+have crossed the tipping point where splitting would reduce cognitive cost.
+
+The formula also correctly ranks the smaller files low. `concurrency.py` (37 lines,
+cohesion 1.0) and `exception_handlers.py` (28 lines, cohesion 1.0) score near zero —
+small, focused files that need no attention.
+
+You can reproduce this in under a minute:
+
+```
+git clone https://github.com/tiangolo/fastapi
+ollama pull nomic-embed-text
+python entropy.py fastapi/fastapi --cohesion auto --all
+```
+
 ## AI Changes the Tempo, Not the Cycle
 
 There is a nuance specific to AI-assisted development that nobody is talking about.

@@ -5,7 +5,7 @@ Computes a composite score based on:
   - File size (LOC relative to cognitive window ~400 LOC)
   - Cyclomatic complexity damper (avg CC per function / codebase median)
   - Concern count (distinct sections / logical groupings)
-  - Semantic cohesion (optional, from external data)
+  - Semantic cohesion (via local ollama embeddings or external JSON)
   - Dependency fan-out (import/using/require count)
 
 The tipping point formula (MDL principle, Rissanen 1978):
@@ -23,6 +23,7 @@ Usage:
   python entropy.py . --threshold 1.2        Custom threshold (default: 1.50)
   python entropy.py . --csv                  Output as CSV
   python entropy.py . --lang py              Only scan Python files
+  python entropy.py . --cohesion auto         Auto-compute cohesion via ollama embeddings
   python entropy.py . --include-tests        Include test files
 
 References:
@@ -34,10 +35,13 @@ Article: "Refactoring Is Not Heroism — An Information-Theoretic Proof"
 """
 
 import argparse
+import hashlib
+import http.client
+import json
+import math
 import os
 import re
 import sys
-import json
 from dataclasses import dataclass
 from typing import Optional
 
@@ -172,35 +176,63 @@ def detect_language(filepath: str) -> Optional[str]:
     return None
 
 
-def count_concerns(content: str, lang: str) -> int:
-    """Estimate distinct concerns via section markers and whitespace gaps."""
+def find_section_boundaries(content: str, lang: str) -> list[int]:
+    """Find line indices where logical section boundaries occur."""
     config = LANG_CONFIG[lang]
-    concerns = 1
+    lines = content.split('\n')
+    boundaries = []
     blank_run = 0
 
-    for line in content.split('\n'):
+    for i, line in enumerate(lines):
         stripped = line.strip()
 
         # Section markers
         for pattern in config["section_markers"]:
             if re.match(pattern, stripped):
-                concerns += 1
+                boundaries.append(i)
                 break
 
         # Comment separators (--- or === lines)
         comment = config["comment_line"]
         if stripped.startswith(comment) and re.search(r'[-=─]{3,}', stripped):
-            concerns += 1
+            boundaries.append(i)
 
         # Blank line gaps (3+ consecutive = intentional separation)
         if stripped == '':
             blank_run += 1
         else:
             if blank_run >= 3:
-                concerns += 1
+                boundaries.append(i)
             blank_run = 0
 
-    return min(concerns, 15)
+    return sorted(set(boundaries))
+
+
+def count_concerns(content: str, lang: str) -> int:
+    """Estimate distinct concerns via section markers and whitespace gaps."""
+    return min(len(find_section_boundaries(content, lang)) + 1, 15)
+
+
+def split_sections(content: str, lang: str) -> list[str]:
+    """Split file content into logical sections for cohesion analysis."""
+    lines = content.split('\n')
+    boundaries = find_section_boundaries(content, lang)
+
+    if not boundaries:
+        return [content]
+
+    cuts = [0] + boundaries + [len(lines)]
+    sections = []
+    for i in range(len(cuts) - 1):
+        section = '\n'.join(lines[cuts[i]:cuts[i + 1]])
+        # Merge tiny sections (<3 non-blank lines) into previous
+        non_blank = sum(1 for l in lines[cuts[i]:cuts[i + 1]] if l.strip())
+        if non_blank < 3 and sections:
+            sections[-1] += '\n' + section
+        else:
+            sections.append(section)
+
+    return [s for s in sections if s.strip()]
 
 
 def count_imports(content: str, lang: str) -> int:
@@ -241,6 +273,58 @@ def estimate_complexity(content: str, lang: str) -> float:
         complexities.append(1 + branches)
 
     return sum(complexities) / len(complexities)
+
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Cosine similarity between two vectors."""
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def embed_sections(sections: list[str], model: str) -> list[list[float]]:
+    """Embed text sections via ollama's /api/embed endpoint."""
+    truncated = [s[:6000] for s in sections]
+    body = json.dumps({"model": model, "input": truncated})
+    conn = http.client.HTTPConnection("localhost", 11434, timeout=30)
+    try:
+        conn.request("POST", "/api/embed", body=body,
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        if "embeddings" in data:
+            return data["embeddings"]
+    finally:
+        conn.close()
+    # Fallback for older ollama: single-prompt endpoint
+    embeddings = []
+    for section in truncated:
+        body = json.dumps({"model": model, "prompt": section})
+        c = http.client.HTTPConnection("localhost", 11434, timeout=30)
+        try:
+            c.request("POST", "/api/embeddings", body=body,
+                      headers={"Content-Type": "application/json"})
+            resp = c.getresponse()
+            result = json.loads(resp.read())
+            embeddings.append(result.get("embedding", []))
+        finally:
+            c.close()
+    return embeddings
+
+
+def compute_file_cohesion(embeddings: list[list[float]]) -> float:
+    """Average pairwise cosine similarity across section embeddings."""
+    if len(embeddings) <= 1:
+        return 1.0
+    pairs = []
+    for i in range(len(embeddings)):
+        for j in range(i + 1, len(embeddings)):
+            if embeddings[i] and embeddings[j]:
+                pairs.append(cosine_similarity(embeddings[i], embeddings[j]))
+    return sum(pairs) / len(pairs) if pairs else 1.0
 
 
 def analyze_file(filepath: str) -> Optional[FileMetrics]:
@@ -326,6 +410,116 @@ def load_cohesion_data(path: Optional[str] = None) -> dict[str, float]:
     return {}
 
 
+def compute_auto_cohesion(source_files: list[str], root: str,
+                          model: str = "nomic-embed-text",
+                          use_cache: bool = True) -> dict[str, float]:
+    """Compute cohesion scores via local ollama embeddings.
+
+    Splits each file into sections, embeds them, and computes average
+    pairwise cosine similarity as the cohesion score (0-1).
+    """
+    # Probe ollama
+    try:
+        probe = http.client.HTTPConnection("localhost", 11434, timeout=5)
+        probe.request("GET", "/api/tags")
+        resp = probe.getresponse()
+        resp.read()
+        probe.close()
+        if resp.status != 200:
+            raise ConnectionError()
+    except Exception:
+        print("Warning: ollama not reachable at localhost:11434 — "
+              "skipping auto-cohesion (using default penalty 0.4)",
+              file=sys.stderr)
+        print("Hint: run 'ollama serve' to enable embedding-based "
+              "cohesion scoring", file=sys.stderr)
+        return {}
+
+    # Load cache
+    cache_path = os.path.join(root, '.entropy-cache.json')
+    cache = {}
+    if use_cache and os.path.exists(cache_path):
+        try:
+            with open(cache_path) as f:
+                cache = json.load(f)
+            if cache.get("model") != model:
+                cache = {}  # Model changed, invalidate
+        except (json.JSONDecodeError, IOError):
+            cache = {}
+
+    files_cache = cache.get("files", {})
+    result = {}
+    embedded = 0
+    cache_hits = 0
+    total = len(source_files)
+
+    print(f"Auto-cohesion: embedding with {model} via ollama",
+          file=sys.stderr)
+
+    for i, fp in enumerate(source_files):
+        lang = detect_language(fp)
+        if lang is None:
+            continue
+
+        try:
+            with open(fp, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+        except (OSError, IOError):
+            continue
+
+        rel = os.path.relpath(fp, root)
+        basename = os.path.basename(fp)
+        content_hash = hashlib.sha256(content.encode()).hexdigest()
+
+        # Check cache
+        cached = files_cache.get(rel)
+        if cached and cached.get("hash") == content_hash:
+            result[basename] = cached["cohesion"]
+            cache_hits += 1
+            continue
+
+        # Split and embed
+        sections = split_sections(content, lang)
+        if len(sections) <= 1:
+            cohesion = 1.0
+            embeddings = []
+        else:
+            try:
+                embeddings = embed_sections(sections, model)
+                cohesion = compute_file_cohesion(embeddings)
+            except Exception as e:
+                print(f"  Warning: embedding failed for {rel}: {e}",
+                      file=sys.stderr)
+                continue
+
+        result[basename] = cohesion
+        embedded += 1
+
+        # Update cache
+        files_cache[rel] = {
+            "hash": content_hash,
+            "sections": len(sections),
+            "cohesion": cohesion,
+        }
+
+        print(f"  [{i+1}/{total}] {rel} ({len(sections)} sections) "
+              f"— {cohesion:.2f}", file=sys.stderr)
+
+    # Save cache
+    if use_cache:
+        cache = {"model": model, "version": 1, "files": files_cache}
+        try:
+            with open(cache_path, 'w') as f:
+                json.dump(cache, f, indent=2)
+        except IOError:
+            pass
+
+    print(f"  Done: {total} files, {cache_hits} from cache, "
+          f"{embedded} embedded", file=sys.stderr)
+
+    return result
+
+
 def compute_scores(files: list[FileMetrics], median_deps: float,
                    baseline_cc: float = 1.0) -> list[FileMetrics]:
     """Compute split-readiness score for each file."""
@@ -385,8 +579,14 @@ def main():
                         help='Only files above threshold')
     parser.add_argument('--lang', choices=list(LANG_CONFIG.keys()),
                         help='Only scan this language')
-    parser.add_argument('--cohesion', metavar='FILE',
-                        help='JSON file with cohesion data (filename → 0-1)')
+    parser.add_argument('--cohesion', metavar='SOURCE',
+                        help='Cohesion data: "auto" for local ollama embeddings, '
+                             'or path to JSON file (filename → 0-1)')
+    parser.add_argument('--cohesion-model', default='nomic-embed-text',
+                        help='Embedding model for --cohesion auto '
+                             '(default: nomic-embed-text)')
+    parser.add_argument('--no-cache', action='store_true',
+                        help='Skip embedding cache (re-embed all files)')
     parser.add_argument('--include-tests', action='store_true',
                         help='Include test files')
     args = parser.parse_args()
@@ -396,12 +596,22 @@ def main():
         print(f"Error: {root} is not a directory", file=sys.stderr)
         sys.exit(1)
 
-    # Load optional cohesion data
-    cohesion_map = load_cohesion_data(args.cohesion)
-
-    # Find and analyze files
+    # Find source files first (needed for both analysis and auto-cohesion)
     source_files = find_source_files(root, lang_filter=args.lang,
                                      include_tests=args.include_tests)
+
+    # Load or compute cohesion data
+    if args.cohesion == "auto":
+        cohesion_map = compute_auto_cohesion(
+            source_files, root,
+            model=args.cohesion_model,
+            use_cache=not args.no_cache)
+    elif args.cohesion:
+        cohesion_map = load_cohesion_data(args.cohesion)
+    else:
+        cohesion_map = {}
+
+    # Analyze files
     metrics = []
     for fp in source_files:
         m = analyze_file(fp)
