@@ -31,7 +31,7 @@ References:
   Cowan (2001), Peitek et al. (2021, ICSE), Sturtevant (2013, MIT)
 
 Article: "Refactoring Is Not Heroism — An Information-Theoretic Proof"
-  https://github.com/HeinrichvH/articles/blob/main/building-with-ai/01-entropy-cycle.md
+  https://github.com/HeinrichvH/articles/blob/main/building-with-ai/01-entropy-cycle/01-entropy-cycle.md
 """
 
 import argparse

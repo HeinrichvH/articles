@@ -388,7 +388,7 @@ The only question is whether you have a rhythm for managing it.
 #set text(size: 9pt, fill: luma(100))
 
 _The formula described in this article is implemented as an open-source Python script
-(#link("https://github.com/HeinrichvH/articles/blob/main/building-with-ai/entropy.py")[entropy.py])
+(#link("https://github.com/HeinrichvH/articles/blob/main/building-with-ai/01-entropy-cycle/entropy.py")[entropy.py])
 that works on any codebase --- Python, JS/TS, Go, Rust, Java, C\#, and more.
 The academic references: Shannon (1948), Rissanen (1978), McCabe (1976),
 Halstead (1977), Cowan (2001), Peitek et al. (2021), Sturtevant (2013, MIT)._

@@ -6,7 +6,7 @@ Articles about topics which generally interest me.
 
 ### Building with AI
 
-- [Refactoring Is Not Heroism — An Information-Theoretic Proof](building-with-ai/01-entropy-cycle.md)
+- [Refactoring Is Not Heroism — An Information-Theoretic Proof](building-with-ai/01-entropy-cycle/01-entropy-cycle.md)
 
 ## License
 
