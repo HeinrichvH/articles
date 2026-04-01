@@ -3,6 +3,7 @@
 
 Computes a composite score based on:
   - File size (LOC relative to cognitive window ~400 LOC)
+  - Cyclomatic complexity damper (avg CC per function / codebase median)
   - Concern count (distinct sections / logical groupings)
   - Semantic cohesion (optional, from external data)
   - Dependency fan-out (import/using/require count)
@@ -10,8 +11,9 @@ Computes a composite score based on:
 The tipping point formula (MDL principle, Rissanen 1978):
   Refactor when L(code|current) > L(code|new) + C(refactor)
 
-Proxy: S(file) = 0.40*(LOC/400) + 0.25*(1-cohesion) + 0.20*(concerns/4) + 0.15*(deps/median)
-  where 400 = cognitive review window (empirical), 4 = working memory chunks (Cowan 2001)
+Proxy: S(file) = 0.40*(LOC/400)*(avg_cc/baseline) + 0.25*(1-cohesion) + 0.20*(concerns/4) + 0.15*(deps/median)
+  where 400 = cognitive review window (empirical), 4 = working memory chunks (Cowan 2001),
+  and avg_cc/baseline dampens size for simple boilerplate and amplifies it for complex logic
 
 Supports: Python, JavaScript/TypeScript, Go, Rust, Java, C#, C/C++, Ruby, PHP.
 
@@ -50,6 +52,13 @@ COGNITIVE_WINDOW = 400  # Code review effectiveness threshold (LOC)
 WORKING_MEMORY = 4      # Working memory chunk limit (Cowan 2001)
 DEFAULT_THRESHOLD = 1.50
 
+# --- Cyclomatic complexity heuristic ---
+BRANCH_KEYWORDS = re.compile(
+    r'\b(if|elif|else\s+if|elsif|elseif|for|foreach|while|do'
+    r'|switch|case|catch|except|when)\b'
+)
+LOGIC_OPS = re.compile(r'&&|\|\|')
+
 
 # --- Language definitions ---
 
@@ -59,6 +68,7 @@ LANG_CONFIG = {
         "import_pattern": r"^\s*(import |from \S+ import )",
         "comment_line": "#",
         "section_markers": [r"^# ---", r"^# ===", r"^class ", r"^def "],
+        "function_pattern": r"^\s*(async\s+)?def\s+\w+",
         "test_patterns": ["test_", "_test.py", "tests/", "conftest.py"],
         "exclude_files": ["__init__.py", "setup.py", "conftest.py"],
     },
@@ -67,6 +77,7 @@ LANG_CONFIG = {
         "import_pattern": r"^\s*(import |require\(|from ['\"])",
         "comment_line": "//",
         "section_markers": [r"^// ---", r"^// ===", r"^export (class|function|const) "],
+        "function_pattern": r"^\s*(?:export\s+)?(?:async\s+)?function\b",
         "test_patterns": [".test.", ".spec.", "__tests__/", "test/"],
         "exclude_files": ["index.js", "index.ts"],
     },
@@ -75,6 +86,7 @@ LANG_CONFIG = {
         "import_pattern": r'^\s*"',
         "comment_line": "//",
         "section_markers": [r"^// ---", r"^func ", r"^type \w+ struct"],
+        "function_pattern": r"^func\s",
         "test_patterns": ["_test.go"],
         "exclude_files": [],
     },
@@ -83,6 +95,7 @@ LANG_CONFIG = {
         "import_pattern": r"^\s*use ",
         "comment_line": "//",
         "section_markers": [r"^// ---", r"^pub fn ", r"^impl ", r"^pub struct "],
+        "function_pattern": r"^\s*(?:pub\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s",
         "test_patterns": ["tests/", "#[cfg(test)]"],
         "exclude_files": ["mod.rs", "lib.rs", "main.rs"],
     },
@@ -91,6 +104,7 @@ LANG_CONFIG = {
         "import_pattern": r"^\s*import ",
         "comment_line": "//",
         "section_markers": [r"^// ---", r"^\s*(public|private|protected) (class|interface) "],
+        "function_pattern": r"^\s*(?:public|private|protected)[\w\s<>]*\s+\w+\s*\(",
         "test_patterns": ["Test.java", "Tests.java", "test/", "Test.kt"],
         "exclude_files": ["package-info.java"],
     },
@@ -99,6 +113,7 @@ LANG_CONFIG = {
         "import_pattern": r"^\s*using ",
         "comment_line": "//",
         "section_markers": [r"^#region", r"^// ---", r"^// ==="],
+        "function_pattern": r"^\s*(?:public|private|protected|internal)[\w\s<>]*\s+\w+\s*\(",
         "test_patterns": ["Tests.cs", ".UnitTests", ".IntegrationTests"],
         "exclude_files": ["GlobalUsings.cs", "Program.cs", "AssemblyInfo.cs"],
     },
@@ -107,6 +122,7 @@ LANG_CONFIG = {
         "import_pattern": r"^\s*#include ",
         "comment_line": "//",
         "section_markers": [r"^// ---", r"^// ==="],
+        "function_pattern": r"^[a-zA-Z_][\w\s*]+\w+\s*\([^;]*$",
         "test_patterns": ["test_", "_test.", "tests/"],
         "exclude_files": [],
     },
@@ -115,6 +131,7 @@ LANG_CONFIG = {
         "import_pattern": r"^\s*require ",
         "comment_line": "#",
         "section_markers": [r"^# ---", r"^class ", r"^module "],
+        "function_pattern": r"^\s*def\s+\w+",
         "test_patterns": ["_test.rb", "_spec.rb", "test/", "spec/"],
         "exclude_files": [],
     },
@@ -123,6 +140,7 @@ LANG_CONFIG = {
         "import_pattern": r"^\s*use ",
         "comment_line": "//",
         "section_markers": [r"^// ---", r"^class ", r"^(public|private|protected) function "],
+        "function_pattern": r"^\s*(?:public\s+|private\s+|protected\s+|static\s+)*function\s+\w+",
         "test_patterns": ["Test.php", "Tests.php", "tests/"],
         "exclude_files": [],
     },
@@ -135,12 +153,14 @@ class FileMetrics:
     loc: int = 0
     concerns: int = 1
     imports: int = 0
+    avg_cc: float = 1.0
     cohesion: Optional[float] = None
     score: float = 0.0
     size_score: float = 0.0
     cohesion_score: float = 0.0
     concern_score: float = 0.0
     dep_score: float = 0.0
+    cc_ratio: float = 1.0
 
 
 def detect_language(filepath: str) -> Optional[str]:
@@ -190,6 +210,39 @@ def count_imports(content: str, lang: str) -> int:
     return sum(1 for line in content.split('\n') if re.match(pattern, line))
 
 
+def estimate_complexity(content: str, lang: str) -> float:
+    """Estimate average cyclomatic complexity per function (heuristic).
+
+    Counts branching keywords between function boundaries.
+    Returns average (branches + 1) per function, or 1.0 if no functions detected.
+    """
+    config = LANG_CONFIG[lang]
+    func_pattern = config.get("function_pattern")
+    if not func_pattern:
+        return 1.0
+
+    lines = content.split('\n')
+    comment_char = config["comment_line"]
+
+    func_starts = [i for i, line in enumerate(lines) if re.match(func_pattern, line)]
+    if not func_starts:
+        return 1.0
+
+    complexities = []
+    for idx, start in enumerate(func_starts):
+        end = func_starts[idx + 1] if idx + 1 < len(func_starts) else len(lines)
+        branches = 0
+        for line in lines[start:end]:
+            stripped = line.strip()
+            if stripped.startswith(comment_char):
+                continue
+            branches += len(BRANCH_KEYWORDS.findall(stripped))
+            branches += len(LOGIC_OPS.findall(stripped))
+        complexities.append(1 + branches)
+
+    return sum(complexities) / len(complexities)
+
+
 def analyze_file(filepath: str) -> Optional[FileMetrics]:
     """Analyze a single source file."""
     lang = detect_language(filepath)
@@ -212,6 +265,7 @@ def analyze_file(filepath: str) -> Optional[FileMetrics]:
         loc=loc,
         concerns=count_concerns(content, lang),
         imports=count_imports(content, lang),
+        avg_cc=estimate_complexity(content, lang),
     )
 
 
@@ -272,10 +326,12 @@ def load_cohesion_data(path: Optional[str] = None) -> dict[str, float]:
     return {}
 
 
-def compute_scores(files: list[FileMetrics], median_deps: float) -> list[FileMetrics]:
+def compute_scores(files: list[FileMetrics], median_deps: float,
+                   baseline_cc: float = 1.0) -> list[FileMetrics]:
     """Compute split-readiness score for each file."""
     for f in files:
-        f.size_score = f.loc / COGNITIVE_WINDOW
+        f.cc_ratio = f.avg_cc / baseline_cc if baseline_cc > 0 else 1.0
+        f.size_score = (f.loc / COGNITIVE_WINDOW) * f.cc_ratio
         f.cohesion_score = (1.0 - f.cohesion) if f.cohesion is not None else 0.4
         f.concern_score = f.concerns / WORKING_MEMORY
         f.dep_score = f.imports / median_deps if median_deps > 0 else 0
@@ -295,22 +351,22 @@ def print_table(files: list[FileMetrics], root: str, limit: int = 20,
     """Print results as a formatted table."""
     display = files if show_all else files[:limit]
 
-    print(f"\n{'Score':>6}  {'LOC':>5}  {'Coh':>5}  {'Con':>3}  {'Imp':>3}  Path")
-    print(f"{'─'*6}  {'─'*5}  {'─'*5}  {'─'*3}  {'─'*3}  {'─'*60}")
+    print(f"\n{'Score':>6}  {'LOC':>5}  {'CC':>4}  {'Coh':>5}  {'Con':>3}  {'Imp':>3}  Path")
+    print(f"{'─'*6}  {'─'*5}  {'─'*4}  {'─'*5}  {'─'*3}  {'─'*3}  {'─'*60}")
 
     for f in display:
         rel = os.path.relpath(f.path, root)
         coh = f"{f.cohesion:.2f}" if f.cohesion is not None else "  n/a"
-        print(f"{f.score:6.2f}  {f.loc:5d}  {coh}  {f.concerns:3d}  {f.imports:3d}  {rel}")
+        print(f"{f.score:6.2f}  {f.loc:5d}  {f.avg_cc:4.1f}  {coh}  {f.concerns:3d}  {f.imports:3d}  {rel}")
 
 
 def print_csv(files: list[FileMetrics], root: str):
     """Output as CSV."""
-    print("score,loc,cohesion,concerns,imports,path")
+    print("score,loc,avg_cc,cc_ratio,cohesion,concerns,imports,path")
     for f in files:
         rel = os.path.relpath(f.path, root)
         coh = f"{f.cohesion:.4f}" if f.cohesion is not None else ""
-        print(f"{f.score:.4f},{f.loc},{coh},{f.concerns},{f.imports},{rel}")
+        print(f"{f.score:.4f},{f.loc},{f.avg_cc:.2f},{f.cc_ratio:.2f},{coh},{f.concerns},{f.imports},{rel}")
 
 
 def main():
@@ -364,8 +420,12 @@ def main():
     all_imports = sorted(m.imports for m in metrics)
     median_deps = all_imports[len(all_imports) // 2] if all_imports else 1
 
+    # Median cyclomatic complexity (baseline for damper)
+    all_cc = sorted(m.avg_cc for m in metrics)
+    baseline_cc = max(all_cc[len(all_cc) // 2], 1.0) if all_cc else 1.0
+
     # Score
-    metrics = compute_scores(metrics, median_deps)
+    metrics = compute_scores(metrics, median_deps, baseline_cc)
 
     if args.above:
         metrics = [m for m in metrics if m.score >= args.threshold]
@@ -378,11 +438,11 @@ def main():
     else:
         print(f"\n  Split-Readiness Analysis (threshold: {args.threshold})")
         print(f"  {len(metrics)} files analyzed, {above} above threshold")
-        print(f"  Median imports: {median_deps}")
+        print(f"  Median imports: {median_deps}, Baseline CC: {baseline_cc:.1f}")
         print_table(metrics, root, limit=args.top, show_all=args.all)
 
         if above > 0:
-            print(f"\n  S = {W_SIZE}*(LOC/{COGNITIVE_WINDOW}) "
+            print(f"\n  S = {W_SIZE}*(LOC/{COGNITIVE_WINDOW})*(avg_cc/baseline) "
                   f"+ {W_COHESION}*(1-cohesion) "
                   f"+ {W_CONCERNS}*(concerns/{WORKING_MEMORY}) "
                   f"+ {W_DEPS}*(imports/median)")
