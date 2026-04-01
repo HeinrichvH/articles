@@ -38,6 +38,24 @@ Refactor when:  L(code | current_structure) > L(code | new_structure) + C(refact
 Where `L` is description length — the cognitive cost of understanding the code under
 a given organizational scheme — and `C` is the cost of restructuring.
 
+Consider a concrete example: your application's state management file. It starts clean
+— user authentication state, a few actions, a reducer. Then the next sprint adds
+shopping cart state. Then notification preferences. Then a real-time sync layer. Each
+addition is small and logical — "it's all state, it belongs here." Six months later
+the file is 1,200 lines and four unrelated domains share a single reducer. Changing
+the cart logic means scrolling past auth and notification code. A bug in the sync
+layer sends you searching through all four concerns because the state shapes are
+interleaved.
+
+Now imagine splitting along domain boundaries: four files, each ~300 lines, each
+owning its own slice of state. The cost of splitting is real — rewiring imports,
+updating tests, one afternoon of focused work. But after the split, every future
+change touches one concern, requires one mental model, and risks breaking nothing
+outside its boundary.
+
+The formula says: refactor when the ongoing cost of navigating the mess exceeds the
+one-time cost of cleaning it up. That crossing point is the tipping point.
+
 Software engineering has been measuring proxies for `L` for decades: cyclomatic
 complexity (McCabe, 1976), Halstead volume, coupling metrics (Yourdon & Constantine,
 1979). And neuroscience confirmed the biological constraint: fMRI studies show that
@@ -49,7 +67,7 @@ independent chunks (Cowan, 2001).
 We built a composite formula that combines these signals:
 
 ```
-S(file) = 0.40 * (LOC / 400)
+S(file) = 0.40 * (LOC / 400) * (avg_cc / baseline_cc)
         + 0.25 * (1 - cohesion)
         + 0.20 * (concerns / 4)
         + 0.15 * (imports / median)
@@ -57,6 +75,9 @@ S(file) = 0.40 * (LOC / 400)
 
 Where:
 - **400** is the empirical code review effectiveness window (LOC)
+- **avg_cc / baseline_cc** is the cyclomatic complexity damper — the average cyclomatic
+  complexity per function divided by the codebase median. Simple boilerplate (cc ≈ 1)
+  dampens the size signal; deeply nested logic (cc >> baseline) amplifies it
 - **cohesion** is semantic similarity between code sections (0-1, measured via embeddings)
 - **4** is the working memory chunk limit (Cowan, 2001)
 - **imports/median** normalizes dependency fan-out against the codebase
@@ -65,9 +86,19 @@ Each weight reflects the research: fMRI data shows file size dominates cognitive
 (0.40), followed by how many unrelated things a file does (cohesion: 0.25, concerns:
 0.20), and finally coupling to external modules (0.15).
 
-Cohesion is the load-bearing term. Without it, the formula degrades to a size+import
-counter that cannot distinguish a 400-line file of identical boilerplate from a
-400-line file with 15 unrelated concerns. Cohesion is what makes the formula work.
+The cyclomatic complexity factor acts as a damper on the size term, not as an
+independent weight. A 600-line file of identical four-line mappings has a cc near 1 —
+the damper shrinks its size contribution, and the formula correctly scores it as
+harmless. A 400-line file with deeply branching conditionals has a cc well above
+baseline — the damper amplifies the size signal, flagging it even though the raw LOC
+looks moderate. Size tells you how much code there is. Cyclomatic complexity tells you
+how hard each line is to reason about. The damper combines both into a single measure
+of cognitive weight.
+
+Cohesion is the other load-bearing term. Without it, the formula cannot distinguish a
+large file that does one thing from a large file that does fifteen. Cohesion and the
+cc damper serve different purposes: cohesion separates "many concerns" from "one
+concern," while cc separates "complex logic" from "simple repetition."
 
 ## Testing It Against Reality
 
@@ -77,7 +108,8 @@ microservices.
 In a recent cleanup cycle, we split eight service files that had grown too large —
 each between 800 and 1,400 lines. No planning, no "refactoring sprint." We felt the
 friction and cleaned up. Pure structural refactors: no logic changes, just splitting
-along seams that were already visible in the code.
+along seams that were already visible in the code. Tests passed unchanged — confirming
+these were structural moves, not behavioral ones.
 
 When we scored those eight files retroactively using the formula, they all fell above
 the tipping point. The formula predicted exactly the splits we had already made by
@@ -95,11 +127,14 @@ delegation. The formula scored them high because of import count and concern cou
 but there was no actual complexity to reduce. **80% hit rate on a forward-looking scan,
 without the formula having been tuned for this round.**
 
-The false positives had a common cause: missing cohesion data. The embedding pipeline
-had silently truncated results, so those files scored with a default penalty instead
-of their actual (high) cohesion. Once we fixed the pipeline to return complete data,
-the formula would have correctly scored those dispatchers below threshold — because
-cohesion is the term that distinguishes "large and messy" from "large but uniform."
+The false positives had two defenses that both failed. First, missing cohesion data:
+the embedding pipeline had silently truncated results, so those files scored with a
+default penalty instead of their actual (high) cohesion. Second, the cc damper: those
+dispatchers had a cyclomatic complexity near 1 per function — trivial straight-line
+delegations. With working cohesion data *and* the cc damper, both files would have
+scored well below threshold. Cohesion catches "large but uniform." The cc damper
+catches "large but simple." Together they eliminate the class of false positives where
+a file is big but harmless.
 
 **A formula with incomplete inputs can give false confidence.** It still beats gut
 feeling (which missed nine candidates entirely), but metrics fail silently. You need
@@ -126,6 +161,13 @@ But AI can also *read* 800 lines without friction. It doesn't scroll. It doesn't
 context. So the pain signal — the moment you feel that a file is too large — arrives
 later than it should. The human is still the bottleneck for comprehension, but the AI
 masks the symptom by handling the navigation invisibly.
+
+Debugging reveals the cost. AI can assist with debugging too — suggesting hypotheses,
+reading logs, proposing fixes. But you have to steer it. You have to decide which
+hypothesis to pursue, which part of the state to inspect, where the real boundary of
+the problem lies. That steering requires understanding the code. The less you
+comprehend the structure, the worse your questions become, and the more cycles you
+waste chasing the wrong lead. AI amplifies your understanding — it does not replace it.
 
 This creates a gap: the theoretical tipping point (where restructuring is cheaper)
 might be at 500 lines, but you don't *feel* it until 800 because your AI partner was
@@ -173,8 +215,10 @@ two halves of the same cycle. Like breathing.
 Resist the mess — refuse to ship anything imperfect — and you never grow. You spend
 your energy on abstraction layers that anticipate problems you don't have.
 
-Resist the cleaning — treat refactoring as wasteful — and the mess compounds. Every
-change requires understanding the entire system because nothing is contained anymore.
+Resist the cleaning — treat refactoring as wasteful — and the mess compounds.
+Concerns bleed across file boundaries, dependencies grow implicit, and eventually
+every change requires understanding the entire system because no single piece is
+self-contained.
 
 The entropy cycle is not a philosophy. It is the information-theoretic consequence of
 building systems that do real work. Entropy is not your enemy. It is proof that your
