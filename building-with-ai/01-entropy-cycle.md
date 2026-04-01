@@ -56,6 +56,8 @@ outside its boundary.
 The formula says: refactor when the ongoing cost of navigating the mess exceeds the
 one-time cost of cleaning it up. That crossing point is the tipping point.
 
+![The MDL tipping point: when restructuring becomes cheaper than continuing.](figures/article-mdl-tipping-point.png)
+
 Software engineering has been measuring proxies for `L` for decades: cyclomatic
 complexity (McCabe, 1976), Halstead volume, coupling metrics (Yourdon & Constantine,
 1979). And neuroscience confirmed the biological constraint: fMRI studies show that
@@ -81,6 +83,8 @@ Where:
 - **cohesion** is semantic similarity between code sections (0-1, measured via embeddings)
 - **4** is the working memory chunk limit (Cowan, 2001)
 - **imports/median** normalizes dependency fan-out against the codebase
+
+![Score breakdown for a 600 LOC file with 5 concerns and low cohesion.](figures/article-formula-breakdown.png)
 
 Each weight reflects the research: fMRI data shows file size dominates cognitive load
 (0.40), followed by how many unrelated things a file does (cohesion: 0.25, concerns:
@@ -143,6 +147,8 @@ to validate the pipeline, not just the math.
 The score distribution follows the pattern information theory predicts: a right-skewed
 curve with the bulk of files in a healthy range and a thin tail of files accumulating
 entropy.
+
+![Every split lands in the cognitive window (250-420 LOC).](figures/article-convergence.png)
 
 After splitting, file sizes converged to **250-420 lines** — the range where a single
 file holds one concern and fits in working memory. This is not a style preference. It
