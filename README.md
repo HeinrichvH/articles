@@ -7,6 +7,7 @@ Articles about topics which generally interest me.
 ### Building with AI
 
 - [Refactoring Is Not Heroism — An Information-Theoretic Proof](building-with-ai/01-entropy-cycle/01-entropy-cycle.md)
+- [Observability >> Predictability — An Information-Theoretic Proof](building-with-ai/02-observability-principle/02-observability-principle.md)
 
 ## License
 

@@ -1,0 +1,30 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#1a1a2e', 'primaryTextColor': '#e0e0e0', 'primaryBorderColor': '#16213e', 'lineColor': '#e94560', 'secondaryColor': '#0f3460', 'tertiaryColor': '#16213e', 'fontFamily': 'Inter, sans-serif'}}}%%
+flowchart LR
+    prep["<b>0. Preparation</b><br/>Observability + Graceful Error Handling"]
+    observe["<b>1. Observe</b><br/>Monitor the running system"]
+    error{"Error<br/>detected?"}
+    regression["<b>2. Write Regression Test</b><br/>Test fails — proves error is real"]
+    fix["<b>3. Fix the Code</b>"]
+    run{"Test<br/>passes?"}
+    deploy["<b>5. Deploy</b>"]
+    fossil[("Fossil Record<br/><i>test suite grows from<br/>real failures only</i>")]
+
+    prep --> observe
+    observe --> error
+    error -- "No" --> observe
+    error -- "Yes" --> regression
+    regression --> fix
+    fix --> run
+    run -- "No" --> fix
+    run -- "Yes" --> deploy
+    deploy --> observe
+    regression -. "adds to" .-> fossil
+
+    style prep fill:#0f3460,stroke:#e94560,stroke-width:2px,color:#e0e0e0
+    style observe fill:#1a1a2e,stroke:#e94560,stroke-width:2px,color:#e0e0e0
+    style error fill:#16213e,stroke:#e94560,stroke-width:2px,color:#e0e0e0
+    style regression fill:#0f3460,stroke:#e94560,stroke-width:2px,color:#e0e0e0
+    style fix fill:#1a1a2e,stroke:#e94560,stroke-width:2px,color:#e0e0e0
+    style run fill:#16213e,stroke:#e94560,stroke-width:2px,color:#e0e0e0
+    style deploy fill:#0f3460,stroke:#e94560,stroke-width:2px,color:#e0e0e0
+    style fossil fill:#533483,stroke:#e94560,stroke-width:2px,color:#e0e0e0,stroke-dasharray: 5 5
