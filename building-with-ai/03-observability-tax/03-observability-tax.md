@@ -159,10 +159,11 @@ less, depending on which 10% is missing.
 
 ## Testing Against Reality
 
-We run six microservices on a production Kubernetes cluster with full distributed
-tracing (OpenTelemetry), centralized logging (Loki), and metrics (Prometheus). Every
-request carries a trace ID. Every service emits structured logs correlated to that
-trace. Every pod reports resource metrics.
+Six of the services running in our production cluster form a closed request chain —
+every call between them is internal, and we instrument the whole chain: distributed
+traces (OpenTelemetry), structured logs (Loki), metrics (Prometheus). Every request
+carries a trace ID through all six hops. Every service emits structured logs
+correlated to that trace. Every pod reports resource metrics.
 
 When something breaks in this environment, the diagnosis pattern is consistent:
 
@@ -337,50 +338,7 @@ someone removes the instrumentation from `BaseExecutionStrategy.cs`, the
 pipeline fails validation on the next scan, and all the files it was
 covering re-emerge as gaps.
 
-Scanning four real running services whose entire business *is*
-observability — the tools we all use to avoid the observability tax — plus
-one internal service with a declared mediator pipeline, gives us a
-comparison that accounts for both per-file and pipeline-level
-instrumentation:
-
-| Codebase | Backend files | Directly instrumented | Pipeline-covered | Dark | k |
-|---|---:|---:|---:|---:|---:|
-| [jaeger](https://github.com/jaegertracing/jaeger) — tracing | 392 | 187 | 0 | 205 | **2** |
-| [loki](https://github.com/grafana/loki) — log aggregation | 1,410 | 696 | 0 | 714 | **2** |
-| *internal .NET service with mediator pipeline* | 1,381 | 185 | 750 | 446 | 3 |
-| [prometheus](https://github.com/prometheus/prometheus) — metrics | 391 | 191 | 15 | 185 | 7 |
-| [grafana](https://github.com/grafana/grafana) — dashboards | 3,442 | 1,746 | 195 | 1,501 | 7 |
-
-Three observations worth naming:
-
-**Jaeger and Loki need no pipeline config.** Their per-file instrumentation
-is already dense enough that the scanner sees coverage everywhere — the
-tracing and logging people dogfood hardest. No declared pipeline, no
-rejection, still `k = 2`.
-
-**Grafana and Prometheus have validated pipelines but they only cover a
-slice.** The `http-middleware` and `http-api` pipelines pass the trust
-check (source coverage 0.44 and 0.65 respectively) and lift a few hundred
-API-layer files. But many `pkg/services/*` subsystems sit outside that
-slice and remain dark — which is an honest signal. Some of those
-subsystems genuinely have lower telemetry density; some may use a
-different pipeline that isn't declared here. A maintainer with more
-context would write a better config.
-
-**The internal service with a declared mediator pipeline scores better
-than Grafana and Prometheus.** Not because the code is intrinsically more
-observable, but because the mediator is a *real* pipeline that instruments
-every request crossing it — 750 handler files get credit, and they earn
-it (the trust check passes at source coverage 0.69). Without the config
-declaration, those 750 files would be flagged as dark and the
-competitive-ratio blowup would look much worse than it actually is. The
-config isn't a free pass; it's documentation of a real architectural
-choice, auditable and falsifiable on every scan.
-
-The CSVs from all five scans are checked into the article repo under
-[`examples/`](examples/), and
-[`.observability.json.example`](examples/.observability.json.example) is a
-template for your own repo. The tool is still a heuristic — regex pattern
+The tool is still a heuristic — regex pattern
 detection plus declared pipelines — and the output is a conversation
 starter, not an audit report. But with a pipeline declaration, the
 conversation can start from the right premise: *what does our

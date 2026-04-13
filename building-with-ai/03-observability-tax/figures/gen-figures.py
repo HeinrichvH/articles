@@ -199,8 +199,8 @@ def draw_competitive_ratio():
         (7,  15, '7 hidden\n15×'),
         (10, 21, '10 hidden\n21×'),
     ]
-    offsets = {0: (-1.2, 1.5), 1: (0.5, 1.5), 3: (0.5, 1.5),
-               5: (-2.5, 1.5), 7: (0.5, 1.5), 10: (-2.5, -2)}
+    offsets = {0: (0, 3.0), 1: (0, 3.0), 3: (0, 3.0),
+               5: (0, 3.0), 7: (0, 3.0), 10: (0, 2.5)}
     for kx, cry, lbl in table_points:
         dx, dy = offsets.get(kx, (0.5, 1.5))
         ax.annotate(lbl, xy=(kx, cry), xytext=(kx + dx, cry + dy),
@@ -212,7 +212,7 @@ def draw_competitive_ratio():
     ax.set_ylabel('Competitive ratio', fontsize=13, labelpad=10)
     ax.set_xticks(k)
     ax.set_xlim(-0.3, 11)
-    ax.set_ylim(0, 26)
+    ax.set_ylim(0, 27)
 
     ax.legend(loc='upper left', fontsize=11, framealpha=0.3,
               edgecolor='#333355')
