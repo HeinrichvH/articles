@@ -1,0 +1,20 @@
+{
+  "_comment": "Example pipeline config for a .NET service using an internal mediator for request dispatch. Place at the scan root as '.observability.json'.",
+  "threshold": 0.30,
+  "pipeline_threshold": 0.30,
+  "pipelines": [
+    {
+      "name": "mediator",
+      "sources": [
+        "Core/Mediator/Mediator.cs",
+        "Core/Mediator/MediatorExecutionStrategy.cs",
+        "Core/ExecutionStrategies/BaseExecutionStrategy.cs"
+      ],
+      "covers": [
+        "**/UserStories/**/*.cs",
+        "**/Handler/**/*.cs",
+        "**/Handlers/**/*.cs"
+      ]
+    }
+  ]
+}
