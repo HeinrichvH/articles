@@ -1,0 +1,38 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#1a1a2e', 'primaryTextColor': '#e0e0e0', 'primaryBorderColor': '#16213e', 'lineColor': '#e94560', 'secondaryColor': '#0f3460', 'tertiaryColor': '#16213e', 'fontFamily': 'Inter, sans-serif'}}}%%
+flowchart LR
+    repo[("Repository<br/>files")]
+
+    subgraph det_track["<b>Stage 1 — Deterministic</b>"]
+        direction LR
+        det["Rule engine<br/><i>YAML concepts</i>"]
+        detfind["Deterministic<br/>findings"]
+        det --> detfind
+    end
+
+    subgraph llm_track["<b>Stage 2 — LLM</b>"]
+        direction LR
+        inv["Investigator<br/><i>Devstral</i>"]
+        claim["Claimed<br/>violations"]
+        ver["Adversarial Verifier<br/><i>mistral-medium-latest</i>"]
+        inv --> claim --> ver
+    end
+
+    detout[/"<b>Deterministic<br/>report section</b>"/]
+    llmout[/"<b>LLM<br/>report section</b>"/]
+
+    repo --> det
+    repo --> inv
+    detfind --> detout
+    ver --> llmout
+
+    style repo fill:#16213e,stroke:#e94560,stroke-width:2px,color:#e0e0e0
+    style det fill:#1a1a2e,stroke:#4ecdc4,stroke-width:2px,color:#e0e0e0
+    style detfind fill:#0f3460,stroke:#4ecdc4,stroke-width:2px,color:#e0e0e0
+    style inv fill:#1a1a2e,stroke:#b388ff,stroke-width:2px,color:#e0e0e0
+    style claim fill:#16213e,stroke:#b388ff,stroke-width:2px,color:#e0e0e0
+    style ver fill:#1a1a2e,stroke:#b388ff,stroke-width:2px,color:#e0e0e0
+    style detout fill:#0f3460,stroke:#4ecdc4,stroke-width:3px,color:#e0e0e0
+    style llmout fill:#533483,stroke:#b388ff,stroke-width:3px,color:#e0e0e0
+
+    style det_track fill:#0a0a1a,stroke:#4ecdc4,stroke-width:1px,color:#4ecdc4
+    style llm_track fill:#0a0a1a,stroke:#b388ff,stroke-width:1px,color:#b388ff
