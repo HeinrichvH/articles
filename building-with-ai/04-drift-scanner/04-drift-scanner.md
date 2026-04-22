@@ -283,30 +283,7 @@ constantia rule waiting to be written — a prose convention in
 transition to an executable one. The document shrinks as the rules
 grow. The tool is the transition instrument.
 
-## The Scanner Is the Measurement
-
-One design choice is worth extracting explicitly. When the scanner
-finds drift, it does not fail the workflow. The workflow succeeds. The
-signal is the issue it posts to the forge.
-
-Early iterations treated drift as a test failure — the process exited
-with a non-zero status and the scheduler marked the run red. This was
-exactly wrong. Drift is not an error in the run. It is a measurement
-produced by the run. A thermometer that reads 38.5 °C has not failed.
-It has reported.
-
-Making that distinction sharp in the exit-code semantics changed how
-the team reads the dashboard. A red constantia run now means the
-scanner itself broke — the clone failed, the model was unreachable, a
-concept file had a schema error. A green run with an open drift issue
-means the instrument is healthy and the patient has a fever. These
-are different facts and deserve different channels.
-
-This is the same pattern as a Prometheus alert. The metric is
-continuous; the alert is discrete; the alert's *absence* does not
-mean the metric is at zero. Scanners that conflate drift-exists with
-run-failed lose this information and, worse, train their operators to
-mute them.
+## Why?
 
 As repositories are increasingly read by agents, the tools that catch
 internal contradiction will stop looking like linters and start
